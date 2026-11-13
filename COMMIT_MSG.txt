@@ -1,0 +1,21 @@
+Resona: streaming client for Simple Player, built around a Rust core
+
+Successor to SimplePlayer-android-app ("Player" stays with the desktop app,
+which plays local files). Same application ID and signing key, so it
+installs over Simple Player Android and keeps its server address, cover
+cache and equalizer presets.
+
+- Rust core (libspcore.so) shared with the desktop app's logic: library
+  snapshot and search index, resync with Simple Player Web Server, play
+  order (shuffle, repeat, queue), parametric equalizer, resampler, spectrum
+- Kotlin keeps only the UI (Compose) and Android integration (Media3)
+- The player holds only the current and the next song, planned by the core
+- Library: search, sort, queue, playing song highlighted, per-list scroll
+- Now playing: 1.x motion (swipe up / down, staged entrance), swipeable
+  cover, synced lyrics following every line, frosted mini player
+- Audio output: Hi-Res (native rate, 24-bit as float), high-quality
+  resampling to the mixer rate, USB DAC bit-perfect on Android 14+
+- Resync runs in a foreground service, so it survives the app going to
+  the background
+- Theme colours, light / dark, Traditional Chinese / English
+- In-app updates from Akiraoo/SimplePlayer-Resona releases

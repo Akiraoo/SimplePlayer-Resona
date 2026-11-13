@@ -1,0 +1,14 @@
+.gradle/
+.kotlin/
+.idea/
+build/
+app/build/
+local.properties
+keystore.properties
+*.jks
+*.keystore
+# built from core/ by cargo-ndk on every Gradle build
+app/src/main/jniLibs/
+core/target/
+# this PC's Visual Studio path
+msvc-env.local.bat
