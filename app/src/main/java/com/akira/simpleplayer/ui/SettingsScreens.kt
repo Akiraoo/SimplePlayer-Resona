@@ -116,6 +116,7 @@ fun SettingsScreen(m: AppModel) {
                     fontSize = 12.sp, color = p.faint, modifier = Modifier.padding(top = 6.dp)
                 )
             }
+            LocalNetBanner(m)
             SyncBanner(m)
 
             Section(tr("外觀", "Appearance")) {

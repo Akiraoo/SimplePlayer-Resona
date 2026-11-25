@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akira.simpleplayer.core.Core
 import com.akira.simpleplayer.core.Lib
+import com.akira.simpleplayer.net.LocalNetwork
 import com.akira.simpleplayer.playback.Playback
 
 /* ---------------- home: playlists ---------------- */
@@ -77,6 +78,7 @@ fun HomeScreen(m: AppModel) {
                 Icon(Icons.Filled.Settings, tr("設定", "Settings"), tint = p.muted)
             }
         }
+        LocalNetBanner(m)
         SyncBanner(m)
         if (m.server.isBlank()) {
             EmptyHint(
@@ -127,6 +129,41 @@ private fun EmptyHint(title: String, body: String, action: String, onAction: () 
         Text(body, fontSize = 13.sp, color = p.muted)
         Spacer(Modifier.height(18.dp))
         Button(onClick = onAction) { Text(action) }
+    }
+}
+
+/** Android 17: the LAN server is unreachable until "Nearby devices" (local network) is allowed. */
+@Composable
+fun LocalNetBanner(m: AppModel) {
+    if (!m.localNetBlocked) return
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp)).background(p.accentSoft)
+            .border(1.dp, p.accentLine, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Text(tr("需要區域網路權限", "Local network access needed"), fontSize = 14.sp, color = p.strong, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            if (m.localNetDenied) tr(
+                "伺服器位址在區域網路上。Android 17 起要允許「附近的裝置」權限才能連線，請到應用程式設定的「權限」開啟。",
+                "The server address is on your local network. Since Android 17 that needs the Nearby devices permission; turn it on under Permissions in the app settings."
+            ) else tr(
+                "伺服器位址在區域網路上。Android 17 起要允許「附近的裝置」權限才能同步和播放（只用來連你的伺服器）。",
+                "The server address is on your local network. Since Android 17 syncing and streaming need the Nearby devices permission (used only to reach your server)."
+            ),
+            fontSize = 12.sp, color = p.muted
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (m.localNetDenied) tr("開啟應用程式設定", "Open app settings") else tr("允許", "Allow"),
+            fontSize = 13.sp, color = p.accent, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                if (m.localNetDenied) LocalNetwork.openAppSettings(ctx) else m.askLocalNet()
+            }.padding(vertical = 4.dp, horizontal = 2.dp)
+        )
     }
 }
 

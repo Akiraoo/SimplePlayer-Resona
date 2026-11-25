@@ -58,11 +58,19 @@ Resona
 * 開著等化器時不算 bit-perfect。
 * 播放器的「目前」那行會顯示這首歌實際的輸出路徑。
 
+## Android 17 與區域網路權限
+
+Resona 以 Android 17（API 37）為目標版本。Android 17 起，App 要連到區域網路位址（`192.168.x.x`、`10.x.x.x`、`172.16–31.x.x`、`100.64–127.x.x`、`169.254.x.x`、IPv6 `fc00::/7`／`fe80::/10`、`*.local`）需要 `ACCESS_LOCAL_NETWORK` 權限（在系統裡歸在「附近的裝置」）；沒有權限時連線只會逾時。
+
+* 伺服器位址是公網 IP 或網域（解析到公網位址）時，不會要求這個權限。
+* 位址在區域網路上時，開啟 App、儲存位址或同步前會先詢問；拒絕後首頁與設定會顯示說明，可再允許或前往應用程式設定開啟。
+* Android 16 以下不受影響。
+
 ## Requirements
 
 * Android Studio
 * JDK 17
-* Android SDK 35
+* Android SDK Platform 37.2（Android 17）
 * Rust（stable）＋ cargo-ndk
 * Android NDK 27.2.12479018
 * Windows：Visual Studio Build Tools（C++），Rust 的建置腳本需要 `link.exe`
@@ -155,12 +163,15 @@ com.akira.simpleplayer
 
 | Component         |    Version |
 | ----------------- | ---------: |
-| Compile SDK       |         35 |
-| Target SDK        |         35 |
+| Compile SDK       |       37.2 |
+| Target SDK        |         37 |
 | Minimum SDK       |         26 |
+| Android Gradle Plugin |   9.5.2 |
+| Gradle            |      9.9.2 |
+| Kotlin            |     2.4.21 |
 | Java              |         17 |
-| Compose BOM       | 2025.01.00 |
-| AndroidX Media3   |      1.5.1 |
+| Compose BOM       | 2026.11.01 |
+| AndroidX Media3   |     1.11.1 |
 | Coil              |      2.7.0 |
 | Haze              |      1.2.2 |
 | Kotlin Coroutines |     1.10.1 |

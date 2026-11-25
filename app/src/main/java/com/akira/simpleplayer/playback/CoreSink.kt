@@ -59,7 +59,9 @@ class CoreSink(
         return super.getFormatSupport(format)
     }
 
-    override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+    // Media3 1.11: the (Format, Int, IntArray) overload is final and forwards here
+    override fun configure(config: AudioSink.AudioSinkConfig) {
+        val inputFormat = config.format
         val code = when (inputFormat.pcmEncoding) {
             C.ENCODING_PCM_16BIT -> Core.PCM_16
             C.ENCODING_PCM_FLOAT -> Core.PCM_FLOAT
@@ -87,9 +89,15 @@ class CoreSink(
                 .setSampleRate(target)
                 .setPcmEncoding(C.ENCODING_PCM_FLOAT)
                 .build()
-            super.configure(out, 0, outputChannels)
+            // new format (rate/float); keep channel mapping and timeline info, drop the
+            // buffer size override (it was sized for the source format)
+            val b = AudioSink.AudioSinkConfig.Builder(out)
+                .setOutputChannelMapping(config.outputChannelMapping)
+            b.setTimeline(config.timeline)
+            config.mediaPeriodId?.let { b.setMediaPeriodId(it) }
+            super.configure(b.build())
         } else {
-            super.configure(inputFormat, specifiedBufferSize, outputChannels)
+            super.configure(config)
         }
     }
 

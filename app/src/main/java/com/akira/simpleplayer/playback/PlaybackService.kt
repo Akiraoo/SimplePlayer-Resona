@@ -119,7 +119,7 @@ class PlaybackService : MediaSessionService() {
                     // float output keeps 24-bit songs at full resolution; CoreSink asks the
                     // decoder for 16-bit instead when Hi-Res is off
                     .setEnableFloatOutput(true)
-                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
                     .build(),
                 { hiRes },
                 router
@@ -201,10 +201,12 @@ class PlaybackService : MediaSessionService() {
         override fun isCommandAvailable(command: Int) = availableCommands.contains(command)
         override fun hasNextMediaItem() = true
         override fun hasPreviousMediaItem() = true
-        override fun seekToNext() = next()
-        override fun seekToNextMediaItem() = next()
-        override fun seekToPrevious() = prev()
-        override fun seekToPreviousMediaItem() = prev()
+        // explicitly the service's: inside ForwardingPlayer a bare next() is Player.next(),
+        // which would just jump to the preloaded item behind the core's back
+        override fun seekToNext() = this@PlaybackService.next()
+        override fun seekToNextMediaItem() = this@PlaybackService.next()
+        override fun seekToPrevious() = this@PlaybackService.prev()
+        override fun seekToPreviousMediaItem() = this@PlaybackService.prev()
         override fun play() = this@PlaybackService.play()
     }
 

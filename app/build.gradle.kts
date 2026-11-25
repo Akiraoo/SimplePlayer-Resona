@@ -3,7 +3,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -30,7 +29,9 @@ val testBuild = project.hasProperty("testbuild")
 
 android {
     namespace = "com.akira.simpleplayer"
-    compileSdk = 35
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
     // NDK used by cargo-ndk for the Rust core (Android Studio > SDK Manager > SDK Tools >
     // NDK (Side by side), this version)
     ndkVersion = "27.2.12479018"
@@ -39,26 +40,16 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlin {
-        jvmToolchain(17)
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-            freeCompilerArgs.addAll(
-                "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-                "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
-            )
-        }
-    }
 
     defaultConfig {
         applicationId = if (testBuild) "com.akira.simpleplayer.remake" else "com.akira.simpleplayer"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 37
         // Must stay above every Simple Player Android APK (its 1.4.0 shipped with 48),
         // since Resona installs over it with the same application ID.
-        versionCode = 60
+        versionCode = 61
         // The in-app updater compares this with the GitHub Release tag.
-        versionName = "1.0.0"
+        versionName = "1.0.1"
         resValue("string", "app_name", if (testBuild) "Resona 測試版" else "Resona")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -88,6 +79,7 @@ android {
         }
     }
 
+    buildFeatures { resValues = true }
     packaging { jniLibs { useLegacyPackaging = false } }
 
     // The release-time lint check crashes when Gradle runs on a newer JDK than lint knows
@@ -101,7 +93,11 @@ android {
 //   rustup target add aarch64-linux-android armv7-linux-androideabi
 //   + the NDK version above, installed from Android Studio's SDK Manager
 // Skip with -PskipCore when the libraries are already there.
-val buildCore by tasks.registering(Exec::class) {
+// AGP 9 moved the SDK location to androidComponents (a lazy provider)
+val sdkDir = androidComponents.sdkComponents.sdkDirectory
+val ndkVer = android.ndkVersion
+
+val buildCore = tasks.register<Exec>("buildCore") {
     workingDir = rootProject.file("core")
     commandLine(
         "cargo", "ndk", "-t", "arm64-v8a", "-t", "armeabi-v7a", "-P", "26",
@@ -115,17 +111,17 @@ val buildCore by tasks.registering(Exec::class) {
         val fromEnv = System.getenv("ANDROID_NDK_HOME")?.takeIf { it.isNotBlank() }?.let { File(it) }
         val ndk = listOfNotNull(
             fromEnv,
-            File(android.sdkDirectory, "ndk/${android.ndkVersion}")
+            File(sdkDir.get().asFile, "ndk/${ndkVer}")
         ).firstOrNull { valid(it) }
             ?: throw GradleException(
-                "NDK ${android.ndkVersion} is not installed (no source.properties in " +
-                    "${File(android.sdkDirectory, "ndk/" + android.ndkVersion)}" +
+                "NDK ${ndkVer} is not installed (no source.properties in " +
+                    "${File(sdkDir.get().asFile, "ndk/" + ndkVer)}" +
                     (fromEnv?.let { " nor in ANDROID_NDK_HOME=$it" } ?: "") + ").\n" +
                     "Install it: Android Studio > SDK Manager > SDK Tools > Show Package Details > " +
-                    "NDK (Side by side) > ${android.ndkVersion}. Or build with -PskipCore."
+                    "NDK (Side by side) > ${ndkVer}. Or build with -PskipCore."
             )
         environment("ANDROID_NDK_HOME", ndk.absolutePath)
-        environment("ANDROID_HOME", android.sdkDirectory.absolutePath)
+        environment("ANDROID_HOME", sdkDir.get().asFile.absolutePath)
         val probe = ProcessBuilder("cargo", "ndk", "--version").redirectErrorStream(true)
         val ok = runCatching { probe.start().waitFor() == 0 }.getOrDefault(false)
         if (!ok) {
@@ -144,19 +140,30 @@ tasks.named("preBuild") { dependsOn(buildCore) }
 // crashes on JDK 25 (see the lint block above), so switch it off outright.
 tasks.matching { it.name.startsWith("lintVital") }.configureEach { enabled = false }
 
+kotlin {
+    jvmToolchain(17)
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        freeCompilerArgs.addAll(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
+        )
+    }
+}
+
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2025.01.00"))
-    implementation("androidx.activity:activity-compose:1.10.0")
+    implementation(platform("androidx.compose:compose-bom:2026.11.01"))
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-session:1.5.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-session:1.11.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     // backdrop blur behind the mini player (Mica-like); plain translucent tint before Android 12
     implementation("dev.chrisbanes.haze:haze:1.2.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.19.1")
 }

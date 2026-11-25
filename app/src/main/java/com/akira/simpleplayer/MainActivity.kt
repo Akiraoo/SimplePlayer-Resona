@@ -8,6 +8,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -22,6 +24,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +50,7 @@ import androidx.core.content.ContextCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.akira.simpleplayer.core.CoreBoot
+import com.akira.simpleplayer.net.LocalNetwork
 import com.akira.simpleplayer.playback.PlaybackService
 import com.akira.simpleplayer.ui.*
 import com.google.common.util.concurrent.ListenableFuture
@@ -67,13 +71,40 @@ class MainActivity : ComponentActivity() {
                     statusBarStyle = if (p.light) SystemBarStyle.light(0, 0) else SystemBarStyle.dark(0),
                     navigationBarStyle = if (p.light) SystemBarStyle.light(0, 0) else SystemBarStyle.dark(0)
                 )
+                PermissionFlow(m)
                 androidx.compose.runtime.key(m.english) { App(m) }
             }
         }
-        if (Build.VERSION.SDK_INT >= 33 &&
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // the permission may have been granted (or revoked) in the system settings meanwhile
+        model.refreshLocalNet(ask = false)
+    }
+
+    /**
+     * Runtime permissions, one dialog at a time (a second request while one is showing is
+     * dropped): notifications first, then local network access whenever the model asks.
+     * Kept outside key(english) so a language switch does not ask again.
+     */
+    @Composable
+    private fun PermissionFlow(m: AppModel) {
+        val needNotify = Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        var notifyDone by rememberSaveable { mutableStateOf(!needNotify) }
+        val notify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifyDone = true }
+        val localNet = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            m.localNetResult(ok, !ok && !LocalNetwork.canAskAgain(this))
+        }
+        LaunchedEffect(Unit) {
+            if (!notifyDone) notify.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        LaunchedEffect(notifyDone, m.localNetAsk) {
+            if (notifyDone && m.localNetAsk) {
+                m.localNetAsk = false
+                localNet.launch(LocalNetwork.PERMISSION)
+            }
         }
     }
 

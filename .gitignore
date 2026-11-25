@@ -12,3 +12,6 @@ app/src/main/jniLibs/
 core/target/
 # this PC's Visual Studio path
 msvc-env.local.bat
+# drafts kept next to the project, not in the repo
+COMMIT_MSG.txt
+release-*.md

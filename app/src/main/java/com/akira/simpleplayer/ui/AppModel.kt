@@ -13,9 +13,11 @@ import com.akira.simpleplayer.AppExecutors
 import com.akira.simpleplayer.core.Core
 import com.akira.simpleplayer.core.CoreBoot
 import com.akira.simpleplayer.core.Lib
+import com.akira.simpleplayer.net.LocalNetwork
 import com.akira.simpleplayer.playback.Playback
 import com.akira.simpleplayer.sync.SyncService
 import com.akira.simpleplayer.update.Updater
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,6 +84,43 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun setServerAddress(v: String) {
         set("server", v)
         loadConfig()
+        refreshLocalNet(ask = false)
+    }
+
+    /* ---------- Android 17 local network permission ---------- */
+
+    /** The server is on the LAN and Android 17 blocks it until the permission is granted. */
+    var localNetBlocked by mutableStateOf(false)
+    /** Denied with "don't ask again": only the system settings page can grant it now. */
+    var localNetDenied by mutableStateOf(false)
+    /** Set to make the activity show the permission dialog (it clears it). */
+    var localNetAsk by mutableStateOf(false)
+    private var pendingSync: Boolean? = null
+
+    private suspend fun checkLocalNet(): Boolean {
+        val server = server
+        val blocked = withContext(Dispatchers.IO) { LocalNetwork.blocked(getApplication(), server) }
+        localNetBlocked = blocked
+        if (!blocked) localNetDenied = false
+        return blocked
+    }
+
+    /** Re-check (server changed, or back from the settings page); ask right away if [ask]. */
+    fun refreshLocalNet(ask: Boolean) {
+        if (!LocalNetwork.enforced) return
+        viewModelScope.launch { if (checkLocalNet() && ask && !localNetDenied) localNetAsk = true }
+    }
+
+    fun askLocalNet() { localNetAsk = true }
+
+    fun localNetResult(granted: Boolean, permanentlyDenied: Boolean) {
+        localNetDenied = !granted && permanentlyDenied
+        val pending = pendingSync
+        pendingSync = null
+        viewModelScope.launch {
+            if (!checkLocalNet()) pending?.let { startSync(it) }
+            else if (pending != null) sync = sync.copy(error = localNetMessage())
+        }
     }
 
     fun changeLight(v: Boolean) { light = v; set("light", v) }
@@ -262,6 +301,23 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun startSync(scanFirst: Boolean) {
         if (server.isBlank()) return
+        if (!LocalNetwork.enforced) return beginSync(scanFirst)
+        viewModelScope.launch {
+            // a LAN server on Android 17 would just time out: get the permission first,
+            // the sync then starts from localNetResult
+            if (checkLocalNet()) {
+                pendingSync = scanFirst
+                if (localNetDenied) sync = sync.copy(error = localNetMessage()) else localNetAsk = true
+            } else beginSync(scanFirst)
+        }
+    }
+
+    private fun localNetMessage() = tr(
+        "伺服器在區域網路上，需要「附近的裝置」權限才能連線",
+        "The server is on the local network: the Nearby devices permission is needed to reach it"
+    )
+
+    private fun beginSync(scanFirst: Boolean) {
         // run inside a foreground service, so leaving the app does not stop it half way
         Core.syncStart(scanFirst)
         SyncService.start(getApplication())
@@ -354,6 +410,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         if (runCatching { JSONObject(Core.syncState()).optBoolean("running") }.getOrDefault(false)) watchSync()
         // the library is synced by hand (as before); only an empty one is fetched right away
         else if (server.isNotBlank() && Lib.size == 0) startSync(false)
+        else refreshLocalNet(ask = true)
         if (autoUpdate && !isTestBuild) checkUpdate(false)
     }
 }
