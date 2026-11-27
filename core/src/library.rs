@@ -335,7 +335,7 @@ pub fn parse_lrc(text: &str) -> Vec<(Option<f64>, String)> {
     }
     if !timed.is_empty() {
         timed.sort_by(|a, b| a.0.total_cmp(&b.0));
-        return timed.into_iter().map(|(t, s)| (Some(t), s)).collect();
+        return unsync_flat(timed.into_iter().map(|(t, s)| (Some(t), s)).collect());
     }
     plain.into_iter().map(|s| (None, s)).collect()
 }
@@ -358,14 +358,28 @@ pub fn parse_lyrics(raw: &str) -> Vec<(Option<f64>, String)> {
     let Ok(meta) = serde_json::from_str::<Meta>(raw) else {
         return Vec::new();
     };
-    meta.lyrics
-        .iter()
-        .filter_map(|l| {
-            let text = l.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
-            let time = l.get("time").and_then(|t| t.as_f64()).filter(|t| t.is_finite());
-            (time.is_some() || !text.trim().is_empty()).then_some((time, text))
-        })
-        .collect()
+    unsync_flat(
+        meta.lyrics
+            .iter()
+            .filter_map(|l| {
+                let text = l.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let time = l.get("time").and_then(|t| t.as_f64()).filter(|t| t.is_finite());
+                (time.is_some() || !text.trim().is_empty()).then_some((time, text))
+            })
+            .collect(),
+    )
+}
+
+/// Lyrics whose lines all carry the same time are not really synced: the web server's
+/// metadata cache turned the `null` time of unsynced lines into 0, and "every line at
+/// 0:00" made the last line the active one (the view scrolled to the bottom). Such lines
+/// are returned as unsynced text.
+pub fn unsync_flat(lines: Vec<(Option<f64>, String)>) -> Vec<(Option<f64>, String)> {
+    let first = lines.first().and_then(|(t, _)| *t);
+    if lines.len() < 2 || first.is_none() || lines.iter().any(|(t, _)| *t != first) {
+        return lines;
+    }
+    lines.into_iter().map(|(_, s)| (None, s)).collect()
 }
 
 #[cfg(test)]
@@ -447,5 +461,11 @@ mod tests {
             (Some(2.5), "two".into()),
             (Some(3.0), "one".into()),
         ]);
+        // unsynced lines whose null time a server cache turned into 0
+        let flat = r#"{"lyrics":[{"time":0,"text":"a"},{"time":0,"text":"b"}]}"#;
+        assert_eq!(parse_lyrics(flat), vec![(None, "a".into()), (None, "b".into())]);
+        assert_eq!(parse_lrc("[00:00.00]a\n[00:00.00]b"), vec![(None, "a".into()), (None, "b".into())]);
+        let one = vec![(Some(0.0), "a".to_string())];
+        assert_eq!(unsync_flat(one.clone()), one);
     }
 }
