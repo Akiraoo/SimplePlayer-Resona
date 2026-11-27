@@ -738,6 +738,26 @@ pub extern "system" fn Java_com_akira_simpleplayer_core_Core_spectrumRead<'l>(
     })
 }
 
+/// The samples fed next (spectrumFeed / pipeProcess) start at this presentation time.
+#[no_mangle]
+pub extern "system" fn Java_com_akira_simpleplayer_core_Core_spectrumAt<'l>(
+    _env: JNIEnv<'l>,
+    _c: JClass<'l>,
+    pts_us: jlong,
+) {
+    guard((), || spectrum::at(pts_us as f64 / 1e6))
+}
+
+/// The output's playback position, in the same time base as spectrumAt.
+#[no_mangle]
+pub extern "system" fn Java_com_akira_simpleplayer_core_Core_spectrumClock<'l>(
+    _env: JNIEnv<'l>,
+    _c: JClass<'l>,
+    pos_us: jlong,
+) {
+    guard((), || spectrum::clock(pos_us as f64 / 1e6))
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_akira_simpleplayer_core_Core_spectrumStop<'l>(
     _env: JNIEnv<'l>,

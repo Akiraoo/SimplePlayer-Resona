@@ -112,6 +112,8 @@ class CoreSink(
         if (!supported) return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         if (pending !== buffer) {
             pending = buffer
+            // the spectrum is queued by media time and shown when the output plays it
+            Core.spectrumAt(presentationTimeUs)
             pendingOut = process(buffer)
         }
         val out = pendingOut ?: buffer
@@ -153,6 +155,14 @@ class CoreSink(
         scratch.limit(samples * bytesPerSample)
         scratch.position(0)
         return scratch
+    }
+
+    // The renderer asks for the position every few ms while playing (and not while paused):
+    // that is the spectrum's clock.
+    override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
+        val pos = super.getCurrentPositionUs(sourceEnded)
+        if (supported && pos != AudioSink.CURRENT_POSITION_NOT_SET) Core.spectrumClock(pos)
+        return pos
     }
 
     override fun flush() {

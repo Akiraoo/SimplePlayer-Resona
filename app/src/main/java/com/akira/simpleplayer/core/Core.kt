@@ -93,6 +93,10 @@ object Core {
         input: ByteBuffer, pos: Int, samples: Int, channels: Int, encoding: Int, rate: Int
     )
     @JvmStatic external fun spectrumRead(dest: FloatArray)
+    /** The samples fed next start at this presentation time (µs, the sink's time base). */
+    @JvmStatic external fun spectrumAt(ptsUs: Long)
+    /** The output's playback position (µs, same time base), reported while it plays. */
+    @JvmStatic external fun spectrumClock(posUs: Long)
 
     /* shared-mode resampling (song rate → output mixer rate, equalizer at the output rate) */
     @JvmStatic external fun pipeNew(srcRate: Int, dstRate: Int, channels: Int): Long

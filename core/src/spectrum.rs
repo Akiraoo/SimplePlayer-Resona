@@ -1,13 +1,18 @@
 //! Audio spectrum for the now-playing visualizer.
 //!
-//! The playback thread feeds decoded PCM into [`feed`]; the UI polls [`read`] once per
-//! display frame and does its own time-based smoothing. No microphone, no system
+//! The playback thread feeds decoded PCM into [`feed_bytes`]; the UI polls [`read`] once
+//! per display frame and does its own time-based smoothing. No microphone, no system
 //! Visualizer.
+//!
+//! The player hands audio to the output in bursts, well ahead of what is heard. So every
+//! spectrum is queued with the media time of its samples ([`at`]), and [`read`] shows the
+//! one at the output's playback position ([`clock`]). Without a clock it shows the newest.
 //!
 //! 2048-point FFT with 50 % overlap (a new spectrum roughly every 23 ms at 44.1 kHz),
 //! reduced to 48 logarithmic bands between 40 Hz and 16 kHz.
 
 use std::f64::consts::PI;
+use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -22,6 +27,12 @@ const DB_CEILING: f32 = -10.0;
 const MIN_POWER: f32 = 1e-10;
 /// No new frame for this long = playback is paused or stopped.
 const STALE: Duration = Duration::from_millis(120);
+/// No clock update for this long = the output is paused (it updates every ~10 ms).
+const CLOCK_STALE: Duration = Duration::from_millis(250);
+/// A queued spectrum further than this from the playback position is not shown.
+const MAX_SKEW: f64 = 0.25;
+/// Spectra queued ahead of the playback position (~12 s at 44.1 kHz).
+const QUEUE: usize = 512;
 
 struct Engine {
     window: Vec<f32>,
@@ -36,15 +47,26 @@ struct Engine {
     re: Vec<f32>,
     im: Vec<f32>,
     rate: u32,
+    /// media time (s) of samples[0]; NaN until [`at`] is called
+    t0: f64,
+}
+
+struct Frame {
+    /// media time (s) of the window's centre, NaN if unknown
+    t: f64,
+    bars: [f32; BARS],
 }
 
 struct Published {
-    bars: [f32; BARS],
+    frames: VecDeque<Frame>,
     at: Option<Instant>,
+    /// output playback position (s) and when it was reported
+    clock: Option<(f64, Instant)>,
 }
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
-static PUBLISHED: Mutex<Published> = Mutex::new(Published { bars: [0.0; BARS], at: None });
+static PUBLISHED: Mutex<Published> =
+    Mutex::new(Published { frames: VecDeque::new(), at: None, clock: None });
 
 impl Engine {
     fn new() -> Engine {
@@ -64,6 +86,7 @@ impl Engine {
             re: vec![0.0; FFT],
             im: vec![0.0; FFT],
             rate: 44_100,
+            t0: f64::NAN,
         };
         e.rebuild_bands();
         e
@@ -92,6 +115,7 @@ impl Engine {
             // keep the newest half for the next (overlapping) frame
             self.samples.copy_within(HOP.., 0);
             self.count = FFT - HOP;
+            self.t0 += HOP as f64 / self.rate as f64;
         }
     }
 
@@ -118,8 +142,12 @@ impl Engine {
                 ((db - DB_FLOOR) / (DB_CEILING - DB_FLOOR)).clamp(0.0, 1.0)
             };
         }
+        let t = self.t0 + (FFT / 2) as f64 / self.rate as f64;
         if let Ok(mut p) = PUBLISHED.lock() {
-            p.bars = bars;
+            if p.frames.len() >= QUEUE {
+                p.frames.pop_front();
+            }
+            p.frames.push_back(Frame { t, bars });
             p.at = Some(Instant::now());
         }
     }
@@ -206,13 +234,60 @@ pub fn feed_bytes(data: &[u8], fmt: crate::eq::Pcm, channels: usize, rate: u32) 
     });
 }
 
-/// The newest spectrum (0..1 per bar); zeros once playback has paused or stopped, so the
-/// bars can fall to rest.
+/// The samples fed next start at media time `secs` (the buffer's presentation time).
+pub fn at(secs: f64) {
+    if !secs.is_finite() {
+        return;
+    }
+    if let Ok(mut guard) = ENGINE.try_lock() {
+        let e = guard.get_or_insert_with(Engine::new);
+        // the samples still held from earlier buffers came right before
+        e.t0 = secs - e.count as f64 / e.rate as f64;
+    }
+}
+
+/// The output's playback position in media time (s), reported while it plays.
+pub fn clock(secs: f64) {
+    if !secs.is_finite() {
+        return;
+    }
+    if let Ok(mut p) = PUBLISHED.lock() {
+        p.clock = Some((secs, Instant::now()));
+    }
+}
+
+/// The spectrum of what is playing now (0..1 per bar); zeros once playback has paused or
+/// stopped, so the bars can fall to rest.
 pub fn read(dest: &mut [f32]) {
     let n = dest.len().min(BARS);
-    match PUBLISHED.lock() {
-        Ok(p) if p.at.is_some_and(|t| t.elapsed() <= STALE) => dest[..n].copy_from_slice(&p.bars[..n]),
-        _ => dest[..n].fill(0.0),
+    let Ok(mut p) = PUBLISHED.lock() else {
+        dest[..n].fill(0.0);
+        return;
+    };
+    let timed = p.frames.back().is_some_and(|f| f.t.is_finite());
+    match p.clock {
+        Some((pos, when)) if timed => {
+            let since = when.elapsed();
+            if since > CLOCK_STALE {
+                dest[..n].fill(0.0);
+                return;
+            }
+            let now = pos + since.as_secs_f64();
+            // drop what has been heard: keep the newest spectrum at or before `now`
+            while p.frames.len() > 1 && p.frames[1].t <= now {
+                p.frames.pop_front();
+            }
+            match p.frames.front() {
+                Some(f) if (now - f.t).abs() <= MAX_SKEW => dest[..n].copy_from_slice(&f.bars[..n]),
+                _ => dest[..n].fill(0.0),
+            }
+        }
+        _ => match p.frames.back() {
+            Some(f) if p.at.is_some_and(|t| t.elapsed() <= STALE) => {
+                dest[..n].copy_from_slice(&f.bars[..n])
+            }
+            _ => dest[..n].fill(0.0),
+        },
     }
 }
 
@@ -221,11 +296,13 @@ pub fn stop() {
     if let Ok(mut guard) = ENGINE.lock() {
         if let Some(e) = guard.as_mut() {
             e.count = 0;
+            e.t0 = f64::NAN;
         }
     }
     if let Ok(mut p) = PUBLISHED.lock() {
-        p.bars = [0.0; BARS];
+        p.frames.clear();
         p.at = None;
+        p.clock = None;
     }
 }
 
@@ -274,5 +351,32 @@ mod tests {
         stop();
         read(&mut bars);
         assert!(bars.iter().all(|v| *v == 0.0));
+
+        // A burst: 1 s of silence, then 1 s of the sine, fed at once (as the player does).
+        // The clock decides what shows: silence at 0.5 s, the sine at 1.5 s, nothing once
+        // the clock stops (paused).
+        stop();
+        let tone: Vec<f32> = (0..rate as usize)
+            .flat_map(|i| {
+                let x = (2.0 * PI * 1000.0 * i as f64 / rate as f64).sin() as f32 * 0.5;
+                [x, x]
+            })
+            .collect();
+        at(10.0);
+        feed_f32(&vec![0.0; rate as usize * 2], 2, rate);
+        at(11.0);
+        feed_f32(&tone, 2, rate);
+        clock(10.5);
+        read(&mut bars);
+        assert!(bars.iter().all(|v| *v == 0.0), "silence while the silence plays");
+        clock(11.5);
+        read(&mut bars);
+        assert!(bars[peak] > 0.8, "the tone once it plays: {}", bars[peak]);
+        if let Ok(mut p) = PUBLISHED.lock() {
+            p.clock = Some((11.5, Instant::now() - CLOCK_STALE * 2));
+        }
+        read(&mut bars);
+        assert!(bars.iter().all(|v| *v == 0.0), "rest when the clock stops");
+        stop();
     }
 }
