@@ -47,9 +47,9 @@ android {
         targetSdk = 37
         // Must stay above every Simple Player Android APK (its 1.4.0 shipped with 48),
         // since Resona installs over it with the same application ID.
-        versionCode = 61
+        versionCode = 62
         // The in-app updater compares this with the GitHub Release tag.
-        versionName = "1.0.1"
+        versionName = "1.0.2"
         resValue("string", "app_name", if (testBuild) "Resona 測試版" else "Resona")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
